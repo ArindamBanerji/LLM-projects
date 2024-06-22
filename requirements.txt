@@ -1,0 +1,14 @@
+langchain
+langchain-community 
+langchain-openai
+neo4j
+langchain-experimental
+wikipedia
+beautifulsoup4
+faiss-cpu
+langchain-cli
+langchainhub
+python-dotenv
+streamlit
+pydantic
+langserve[all]
