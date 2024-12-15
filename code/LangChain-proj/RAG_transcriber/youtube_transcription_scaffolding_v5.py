@@ -47,13 +47,23 @@ from google.colab import drive
 drive.mount('/content/drive')
 
 # VARS: Set these variables
-version_number = 'v38'
+version_number = 'v39'
 youtube_url = "https://www.youtube.com/watch?v=cdiD-9MMpb0"
 code_version = 'v17'  # Updated to match current transcriber version
-base_dir = "/content/drive/My Drive/python-projects/kaggle_experiments/transcriber/"
+# base_dir = "/content/LLM-projects/code/LangChain-proj/RAG_transcriber/"
+
+root_dir = "/content/drive/My Drive/python-projects/kaggle_experiments/transcriber/"
+
+repo_git = "https://github.com/ArindamBanerji/LLM-projects.git" # git repository
+local_repo = "./LLM-projects" # local directory base for repo
+root_offest = "/LLM-projects/code/LangChain-proj/RAG_transcriber/"
+base_dir = root_dir + root_offest
+
+
 fnm = "youtube_transcriber" + "_" + code_version + ".py"
 cur_fnm = fnm
 full_fnm = base_dir + cur_fnm
+print (full_fnm)
 
 # Configure logging
 logging.basicConfig(
@@ -61,6 +71,23 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# go to the root directory - helps for the git pulls
+import os
+os.chdir(root_dir)
+
+# idempotent git pull
+! (test -d $local_repo && git -C $local_repo pull --rebase) || git clone $repo_git
+
+# change directory into the local repo
+import os
+
+cwd = os.getcwd()
+if (os.path.samefile(cwd, base_dir) == False) :
+    os.chdir(base_dir)
+
+#basic test to make sure that the file exists - should probably exit code
+! (test -f "$fnm" && echo "file-exists") || echo "file-not-exists"
 
 def verify_transcript_file(transcript_dir):
     """
@@ -73,6 +100,8 @@ def verify_transcript_file(transcript_dir):
         tuple: (bool, str) - (Success status, Full path of transcript file if found)
     """
     transcript_path = os.path.join(transcript_dir, "transcript.txt")
+
+    print( "transcript path ", transcript_path )
 
     if not os.path.exists(transcript_path):
         logger.error(f"Transcript file not found at: {transcript_path}")
