@@ -14,6 +14,12 @@ Designed to run in Google Colab.
 '''
 """
 
+# !pip install --upgrade openai httpx langchain-openai openai-whisper
+
+# ! pip install -qU langchain-pinecone pinecone-notebooks
+
+# !pip install langchain-community
+
 import subprocess
 import sys
 
@@ -23,6 +29,14 @@ def install_requirements():
     """Install required packages using pip."""
     packages = [
         'importlib',
+        'openai',
+        'httpx',
+        'langchain-openai',
+        'openai-whisper',
+        'docarray',
+        'langchain-community',
+        'langchain_pinecone',
+        'pinecone_notebooks',
         'pathlib'
     ]
     try:
@@ -42,8 +56,10 @@ import importlib.util
 import traceback
 import time
 import logging
+import openai
 from pathlib import Path
 from google.colab import drive
+from pydantic import ValidationError
 
 # Mount Google Drive
 drive.mount('/content/drive')
@@ -65,7 +81,8 @@ base_dir = root_dir + root_offest
 fnm = "youtube_transcriber" + "_" + code_version + ".py"
 cur_fnm = fnm
 full_fnm = base_dir + cur_fnm
-print (full_fnm)
+default_transcript_path = base_dir + "transcriber_" + version_number
+print (full_fnm, default_transcript_path)
 
 # Configure logging
 logging.basicConfig(
@@ -315,6 +332,9 @@ def process_transcription():
 
             # Display sample of transcript
             display_transcript_sample(transcript_path)
+            default_transcript_path = transcript_path
+            logger.info(f"Default transcript path: {default_transcript_path}")
+
         else:
             logger.error("Transcription process failed")
             sys.exit(1)
@@ -332,4 +352,217 @@ def transcribe_video():
         traceback.print_exc()
         sys.exit(1)
 
+# transcribe_video()
+
+from google.colab import userdata
+os.environ["OPENAI_API_KEY"] = userdata.get('OPENAI_API_KEY')
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+os.environ["PINECONE_API_KEY"] = userdata.get('PINECONE_API_KEY')
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+
+from openai import OpenAI
+client = OpenAI()
+
+completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {
+            "role": "user",
+            "content": "Write a short joke about elections."
+        }
+    ]
+)
+
+print(completion.choices[0].message)
+
+from langchain_openai.chat_models import ChatOpenAI
+
+model = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model="gpt-3.5-turbo")
+
+model.invoke("What MLB team won the World Series during the COVID-19 pandemic?")
+
+from langchain_core.output_parsers import StrOutputParser
+
+parser = StrOutputParser()
+
+chain = model | parser
+chain.invoke("What MLB team won the World Series during the COVID-19 pandemic?")
+
+from langchain.prompts import ChatPromptTemplate
+
+template = """
+Answer the question based on the context below. If you can't
+answer the question, reply "I don't know".
+
+Context: {context}
+
+Question: {question}
+"""
+
+prompt = ChatPromptTemplate.from_template(template)
+prompt.format(context="Mary's sister is Susana", question="Who is Mary's sister?")
+
+chain = prompt | model | parser
+chain.invoke({
+    "context": "Mary's sister is Susana",
+    "question": "Who is Mary's sister?"
+})
+
+translation_prompt = ChatPromptTemplate.from_template(
+    "Translate {answer} to {language}"
+)
+
+from operator import itemgetter
+
+translation_chain = (
+    {"answer": chain, "language": itemgetter("language")} | translation_prompt | model | parser
+)
+
+translation_chain.invoke(
+    {
+        "context": "Mary's sister is Susana. She doesn't have any more siblings.",
+        "question": "How many sisters does Mary have?",
+        "language": "Hindi",
+    }
+)
+
 transcribe_video()
+
+print (default_transcript_path)
+
+!pwd
+
+transcript_fnmm = default_transcript_path + "/transcript.txt"
+print (transcript_fnmm)
+
+with open("transcript.txt") as file:
+    transcription = file.read()
+
+transcription[:100]
+
+try:
+    chain.invoke({
+        "context": transcription,
+        "question": "Is reading papers a good idea?"
+    })
+except Exception as e:
+    print(e)
+
+from langchain_community.document_loaders import TextLoader
+
+loader = TextLoader("transcript.txt")
+text_documents = loader.load()
+text_documents
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=20)
+text_splitter.split_documents(text_documents)[:5]
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=20)
+documents = text_splitter.split_documents(text_documents)
+
+from langchain_openai.embeddings import OpenAIEmbeddings
+
+embeddings = OpenAIEmbeddings()
+embedded_query = embeddings.embed_query("Who is Mary's sister?")
+
+print(f"Embedding length: {len(embedded_query)}")
+print(embedded_query[:10])
+
+sentence1 = embeddings.embed_query("Mary's sister is Susana")
+sentence2 = embeddings.embed_query("Pedro's mother is a teacher")
+
+from sklearn.metrics.pairwise import cosine_similarity
+
+query_sentence1_similarity = cosine_similarity([embedded_query], [sentence1])[0][0]
+query_sentence2_similarity = cosine_similarity([embedded_query], [sentence2])[0][0]
+
+query_sentence1_similarity, query_sentence2_similarity
+
+from pydantic import ValidationError
+
+from langchain_community.vectorstores import DocArrayInMemorySearch
+
+vectorstore1 = DocArrayInMemorySearch.from_texts(
+    [
+        "Mary's sister is Susana",
+        "John and Tommy are brothers",
+        "Patricia likes white cars",
+        "Pedro's mother is a teacher",
+        "Lucia drives an Audi",
+        "Mary has two siblings",
+    ],
+    embedding=embeddings,
+)
+
+vectorstore1.similarity_search_with_score(query="Who is Mary's sister?", k=3)
+
+retriever1 = vectorstore1.as_retriever()
+retriever1.invoke("Who is Mary's sister?")
+
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+
+setup = RunnableParallel(context=retriever1, question=RunnablePassthrough())
+setup.invoke("What color is Patricia's car?")
+
+chain = setup | prompt | model | parser
+chain.invoke("What color is Patricia's car?")
+
+chain.invoke("What car does Lucia drive?")
+
+vectorstore2 = DocArrayInMemorySearch.from_documents(documents, embeddings)
+
+chain = (
+    {"context": vectorstore2.as_retriever(), "question": RunnablePassthrough()}
+    | prompt
+    | model
+    | parser
+)
+chain.invoke("What is synthetic intelligence?")
+
+from pinecone import Pinecone, ServerlessSpec
+
+pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+
+pc = Pinecone(api_key=pinecone_api_key)
+
+import time
+
+index_name = "youtube-rag-index-new"  # change if desired
+
+existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+
+if index_name not in existing_indexes:
+    pc.create_index(
+        name=index_name,
+        dimension=1536,
+        metric="cosine",
+        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+    )
+    while not pc.describe_index(index_name).status["ready"]:
+        time.sleep(1)
+
+index = pc.Index(index_name)
+
+from langchain_pinecone import PineconeVectorStore
+
+# Use the index you created with dimension 1536
+index_name = "youtube-rag-index-new"
+
+pinecone = PineconeVectorStore.from_documents(
+    documents, embeddings, index_name=index_name
+)
+
+pinecone.similarity_search("What is Hollywood going to start doing?")[:3]
+
+chain = (
+    {"context": pinecone.as_retriever(), "question": RunnablePassthrough()}
+    | prompt
+    | model
+    | parser
+)
+
+chain.invoke("What is Hollywood going to start doing?")
