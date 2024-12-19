@@ -17,6 +17,8 @@ Designed to run in Google Colab.
 import subprocess
 import sys
 
+# may need to check if these installs are required
+
 def install_requirements():
     """Install required packages using pip."""
     packages = [
