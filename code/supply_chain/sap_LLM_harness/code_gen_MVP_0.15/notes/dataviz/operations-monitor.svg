@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300">
+    <!-- Background -->
+    <rect width="800" height="300" fill="#ffffff"/>
+    
+    <!-- Title -->
+    <text x="20" y="30" font-family="Arial" font-size="16" font-weight="bold" fill="#ed6c02">Operations Monitor</text>
+    
+    <!-- Stats Panel -->
+    <rect x="20" y="50" width="760" height="60" rx="4" fill="#fff3e0" stroke="#ffb74d"/>
+    <!-- Success Rate -->
+    <text x="40" y="80" font-family="Arial" font-size="12" fill="#333333">Success Rate</text>
+    <text x="40" y="100" font-family="Arial" font-size="14" font-weight="bold" fill="#2e7d32">98%</text>
+    <!-- Total Calls -->
+    <text x="160" y="80" font-family="Arial" font-size="12" fill="#333333">Total Calls</text>
+    <text x="160" y="100" font-family="Arial" font-size="14" font-weight="bold" fill="#333333">45</text>
+    <!-- Active Operations -->
+    <text x="280" y="80" font-family="Arial" font-size="12" fill="#333333">Active Operations</text>
+    <text x="280" y="100" font-family="Arial" font-size="14" font-weight="bold" fill="#1976d2">3</text>
+    
+    <!-- Operations Log -->
+    <rect x="20" y="130" width="760" height="150" rx="4" fill="#ffffff" stroke="#e0e0e0"/>
+    <!-- Operation Entries -->
+    <rect x="30" y="140" width="740" height="30" rx="2" fill="#e8f5e9"/>
+    <text x="40" y="160" font-
