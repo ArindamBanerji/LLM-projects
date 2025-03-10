@@ -2,8 +2,9 @@
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from typing import Dict, Any
-from services.url_service import url_service
 from services.state_manager import state_manager
+from controllers import BaseController
+from datetime import datetime
 
 async def show_dashboard(request: Request) -> Dict[str, Any]:
     """
@@ -18,7 +19,6 @@ async def show_dashboard(request: Request) -> Dict[str, Any]:
     last_visit = state_manager.get("last_dashboard_visit", "First visit")
     
     # Set current visit time
-    from datetime import datetime
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     state_manager.set("last_dashboard_visit", current_time)
     
@@ -33,6 +33,5 @@ async def redirect_to_dashboard(request: Request) -> RedirectResponse:
     """
     Redirects from root '/' to '/dashboard'
     """
-    # Use URL service to generate the dashboard URL
-    dashboard_url = url_service.get_url_for_route("dashboard")
-    return RedirectResponse(url=dashboard_url)
+    # Use BaseController's redirect method
+    return BaseController.redirect_to_route("dashboard")

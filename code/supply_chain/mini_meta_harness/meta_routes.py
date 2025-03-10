@@ -39,5 +39,34 @@ ALL_ROUTES: List[RouteDefinition] = [
         methods=[HttpMethod.GET],
         controller="controllers.dashboard_controller.show_dashboard",
         template="dashboard.html"
+    ),
+    # Error test routes (for manual testing of error handling)
+    RouteDefinition(
+        name="test_not_found",
+        path="/test/not-found",
+        methods=[HttpMethod.GET],
+        controller="controllers.error_test_controller.test_not_found",
+        template=None
+    ),
+    RouteDefinition(
+        name="test_validation_error",
+        path="/test/validation-error",
+        methods=[HttpMethod.GET],
+        controller="controllers.error_test_controller.test_validation_error",
+        template=None
+    ),
+    RouteDefinition(
+        name="test_bad_request",
+        path="/test/bad-request",
+        methods=[HttpMethod.GET],
+        controller="controllers.error_test_controller.test_bad_request",
+        template=None
+    ),
+    RouteDefinition(
+        name="test_success_response",
+        path="/test/success-response",
+        methods=[HttpMethod.GET],
+        controller="controllers.error_test_controller.test_success_response",
+        template=None
     )
 ]

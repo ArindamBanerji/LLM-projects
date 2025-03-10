@@ -4,9 +4,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from meta_routes import ALL_ROUTES, HttpMethod, RouteDefinition
 from services.template_service import TemplateService
+from utils.error_utils import setup_exception_handlers
 
 # Minimal FastAPI app
 app = FastAPI(title="Mini-Meta SAP Harness", version="0.1")
+
+# Set up error handlers
+setup_exception_handlers(app)
 
 # Create one instance of the TemplateService
 template_service = TemplateService()
@@ -37,7 +41,7 @@ for route_def in ALL_ROUTES:
     # This minimal example only uses GET; add POST, etc. if you want more
     if HttpMethod.GET in route_def.methods:
         app.get(route_def.path, name=route_def.name)(endpoint)
-    # If you had POST or others, you’d do something like:
+    # If you had POST or others, you'd do something like:
     # if HttpMethod.POST in route_def.methods:
     #     app.post(route_def.path, name=route_def.name)(endpoint)
 

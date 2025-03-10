@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from controllers.dashboard_controller import show_dashboard, redirect_to_dashboard
+from controllers import BaseController
 from datetime import datetime
 
 class TestDashboardController:
@@ -44,17 +45,17 @@ class TestDashboardController:
     @pytest.mark.asyncio
     async def test_redirect_to_dashboard(self):
         """Test that redirect_to_dashboard returns a RedirectResponse to the dashboard URL"""
-        # Mock the URL service to return a predetermined dashboard URL
-        with patch('controllers.dashboard_controller.url_service.get_url_for_route') as mock_get_url:
-            mock_get_url.return_value = "/dashboard"
+        # Mock the BaseController.redirect_to_route method
+        with patch('controllers.dashboard_controller.BaseController.redirect_to_route') as mock_redirect:
+            # Set up the mock to return a RedirectResponse
+            mock_redirect_response = RedirectResponse(url="/dashboard")
+            mock_redirect.return_value = mock_redirect_response
             
             # Call the controller method
             result = await redirect_to_dashboard(self.mock_request)
             
-            # Verify the URL service was called correctly
-            mock_get_url.assert_called_once_with("dashboard")
+            # Verify the redirect method was called correctly
+            mock_redirect.assert_called_once_with("dashboard")
             
             # Check the result
-            assert isinstance(result, RedirectResponse)
-            assert result.status_code == 307  # Temporary redirect status code
-            assert result.headers["location"] == "/dashboard"
+            assert result is mock_redirect_response
