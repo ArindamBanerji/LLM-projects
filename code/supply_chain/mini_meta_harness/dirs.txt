@@ -1,0 +1,30 @@
+|   dirs.txt
+|   main.py
+|   meta_routes.py
+|   settings.py
+|   
++---controllers
+|   |   dashboard_controller.py
+|   |   __init__.py
+|   |   
+|   \---__pycache__
+|           dashboard_controller.cpython-311.pyc
+|           __init__.cpython-311.pyc
+|           
++---services
+|   |   template_service.py
+|   |   __init__.py
+|   |   
+|   \---__pycache__
+|           template_service.cpython-311.pyc
+|           __init__.cpython-311.pyc
+|           
++---templates
+|       base.html
+|       dashboard.html
+|       __init__.py
+|       
+\---__pycache__
+        main.cpython-311.pyc
+        meta_routes.cpython-311.pyc
+        
