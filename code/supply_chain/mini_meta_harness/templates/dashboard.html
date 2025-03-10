@@ -2,4 +2,13 @@
 
 {% block content %}
 <p>{{ welcome_message }}</p>
+<p>Current page URL: {{ url_for('dashboard') }}</p>
+
+<hr>
+<h2>Dashboard Information</h2>
+<ul>
+    <li><strong>Visit count:</strong> {{ visit_count }}</li>
+    <li><strong>Last visit:</strong> {{ last_visit }}</li>
+    <li><strong>Current time:</strong> {{ current_time }}</li>
+</ul>
 {% endblock %}
