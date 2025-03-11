@@ -45,7 +45,20 @@ for route_def in ALL_ROUTES:
     # if HttpMethod.POST in route_def.methods:
     #     app.post(route_def.path, name=route_def.name)(endpoint)
 
-# Optionally, a startup event or logging
+# Startup event to initialize services
 @app.on_event("startup")
 async def startup_event():
+    """
+    Initialize application services on startup.
+    This ensures all services are properly initialized
+    when the application starts.
+    """
     print("Mini-meta harness started.")
+    
+    # Initialize services
+    from services.material_service import material_service
+    from services.p2p_service import p2p_service
+    
+    # Log services initialization
+    print(f"Material service initialized: {material_service.__class__.__name__}")
+    print(f"P2P service initialized: {p2p_service.__class__.__name__}")

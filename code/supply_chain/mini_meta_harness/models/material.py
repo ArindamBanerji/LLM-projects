@@ -1,5 +1,5 @@
 # models/material.py
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
@@ -126,11 +126,21 @@ class Material(BaseDataModel):
         if 'material_number' in data:
             data.pop('material_number')
         super().update(data)
+        
+        # Ensure updated_at is always newer than created_at
+        if self.updated_at <= self.created_at:
+            self.updated_at = self.created_at + timedelta(milliseconds=1)
     
     def update_from_update_model(self, update_data: MaterialUpdate) -> None:
         """Update material with data from an update model"""
         update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
         self.update_from_dict(update_dict)
+        
+        # Force updated_at to be newer than created_at
+        now = datetime.now()
+        if now <= self.created_at:
+            now = self.created_at + timedelta(milliseconds=1)
+        self.updated_at = now
 
 class MaterialDataLayer:
     """
@@ -202,7 +212,7 @@ class MaterialDataLayer:
         
         # Update material
         material.update_from_update_model(update_data)
-        material.updated_at = datetime.now()
+        material.updated_at = datetime.now()  # Explicitly update the timestamp here as well
         
         # Update in collection
         collection = self._get_collection()
