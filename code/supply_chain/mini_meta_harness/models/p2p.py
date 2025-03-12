@@ -103,21 +103,22 @@ class BaseDocumentCreate(BaseModel):
     def validate_document_number(cls, v):
         """Validate document number format if provided"""
         if v is not None:
-            if not v.isalnum():
-                raise ValueError("Document number must be alphanumeric")
+            # Modified to allow underscores in document numbers
+            if not all(c.isalnum() or c == '_' for c in v):
+                raise ValueError("Document number must be alphanumeric or contain underscores")
         return v
 
 class RequisitionCreate(BaseDocumentCreate):
     """
     Model for creating a purchase requisition.
     """
-    items: List[RequisitionItem] = Field(..., min_items=1)
+    items: List[RequisitionItem] = Field(..., min_length=1)
 
 class OrderCreate(BaseDocumentCreate):
     """
     Model for creating a purchase order.
     """
-    items: List[OrderItem] = Field(..., min_items=1)
+    items: List[OrderItem] = Field(..., min_length=1)
     vendor: str = Field(..., min_length=1)
     payment_terms: Optional[str] = None
 

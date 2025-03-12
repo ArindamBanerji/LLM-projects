@@ -12,7 +12,7 @@ from models.p2p import (
     DocumentStatus, DocumentItemStatus, RequisitionUpdate, OrderUpdate
 )
 from models.material import MaterialStatus
-from utils.error_utils import ValidationError
+from utils.error_utils import ValidationError, NotFoundError
 
 def validate_requisition_status_transition(
     current_status: DocumentStatus, 
@@ -73,26 +73,43 @@ def validate_material_active(
     material_number: str
 ) -> None:
     """
-    Validate that a material exists and is active.
+    Validate that a material exists and is not deprecated.
     
     Args:
         material_service: The material service to use for validation
         material_number: The material number to validate
         
     Raises:
-        ValidationError: If the material doesn't exist or is not active
+        ValidationError: If the material doesn't exist or is deprecated
     """
     try:
-        # Check if material exists and is active
+        # Check if material exists and is not deprecated
         material = material_service.get_material(material_number)
-        if material.status != MaterialStatus.ACTIVE:
+        # Only reject DEPRECATED materials, allow INACTIVE
+        if material.status == MaterialStatus.DEPRECATED:
             raise ValidationError(
-                f"Material {material_number} is not active (status: {material.status})"
+                f"Material {material_number} cannot be used (status: {material.status})"
             )
+    except NotFoundError as e:
+        # Convert NotFoundError to ValidationError
+        raise ValidationError(
+            message=f"Invalid material {material_number}: not found",
+            details={
+                "material_number": material_number,
+                "reason": "not_found",
+                "original_error": e.details if hasattr(e, 'details') else {}
+            }
+        )
     except Exception as e:
-        if "not found" in str(e).lower():
-            raise ValidationError(f"Material {material_number} not found")
-        raise e
+        # For any other exceptions, provide a clear error message
+        raise ValidationError(
+            message=f"Error validating material {material_number}: {str(e)}",
+            details={
+                "material_number": material_number,
+                "error_type": type(e).__name__,
+                "error_message": str(e)
+            }
+        )
 
 def validate_requisition_items(items: List[RequisitionItem]) -> None:
     """

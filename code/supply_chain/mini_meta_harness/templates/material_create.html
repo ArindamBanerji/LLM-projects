@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row mb-3">
+        <div class="col">
+            <h1>{% if material %}Edit Material{% else %}Create New Material{% endif %}</h1>
+        </div>
+        <div class="col-auto">
+            <a href="{{ url_for('material_list') }}" class="btn btn-secondary">Back to List</a>
+        </div>
+    </div>
+    
+    <!-- General errors display -->
+    {% if errors and errors.get('_general') %}
+    <div class="alert alert-danger">
+        {{ errors.get('_general') }}
+    </div>
+    {% endif %}
+    
+    <div class="card">
+        <div class="card-body">
+            <form method="POST" action="{{ form_action }}" id="material-form">
+                <div class="row">
+                    <div class="col-md-6">
+                        <!-- Basic information section -->
+                        <h4>Basic Information</h4>
+                        
+                        <!-- Material Number (if editing) -->
+                        {% if material %}
+                        <div class="mb-3">
+                            <label for="material_number" class="form-label">Material Number</label>
+                            <input type="text" class="form-control" id="material_number" name="material_number" 
+                                   value="{{ material.material_number }}" readonly>
+                            <div class="form-text">Material number cannot be changed after creation.</div>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Name field -->
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control {% if errors and errors.get('name') %}is-invalid{% endif %}" 
+                                   id="name" name="name" required 
+                                   value="{{ form_data.get('name') or (material.name if material else '') }}">
+                            {% if errors and errors.get('name') %}
+                            <div class="invalid-feedback">
+                                {{ errors.get('name') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Description field -->
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control {% if errors and errors.get('description') %}is-invalid{% endif %}" 
+                                      id="description" name="description" rows="3">{{ form_data.get('description') or (material.description if material else '') }}</textarea>
+                            {% if errors and errors.get('description') %}
+                            <div class="invalid-feedback">
+                                {{ errors.get('description') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Type field -->
+                        <div class="mb-3">
+                            <label for="type" class="form-label">Material Type <span class="text-danger">*</span></label>
+                            <select class="form-select {% if errors and errors.get('type') %}is-invalid{% endif %}" 
+                                    id="type" name="type" required>
+                                {% for type in options.types %}
+                                <option value="{{ type }}" 
+                                        {% if form_data.get('type') == type or (material and material.type == type) %}selected{% endif %}>
+                                    {{ type }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if errors and errors.get('type') %}
+                            <div class="invalid-feedback">
+                                {{ errors.get('type') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Base Unit field -->
+                        <div class="mb-3">
+                            <label for="base_unit" class="form-label">Base Unit <span class="text-danger">*</span></label>
+                            <select class="form-select {% if errors and errors.get('base_unit') %}is-invalid{% endif %}" 
+                                    id="base_unit" name="base_unit" required>
+                                {% for unit in options.units %}
+                                <option value="{{ unit }}" 
+                                        {% if form_data.get('base_unit') == unit or (material and material.base_unit == unit) %}selected{% endif %}>
+                                    {{ unit }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if errors and errors.get('base_unit') %}
+                            <div class="invalid-feedback">
+                                {{ errors.get('base_unit') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <!-- Additional information section -->
+                        <h4>Additional Information</h4>
+                        
+                        <!-- Weight field -->
+                        <div class="mb-3">
+                            <label for="weight" class="form-label">Weight</label>
+                            <div class="input-group">
+                                <input type="number" step="0.01" min="0" 
+                                       class="form-control {% if errors and errors.get('weight') %}is-invalid{% endif %}" 
+                                       id="weight" name="weight" 
+                                       value="{{ form_data.get('weight') or (material.weight if material else '') }}" 
+                                       aria-describedby="weight-unit">
+                                <span class="input-group-text" id="weight-unit">
+                                    <span id="weight-unit-text">
+                                        {% if form_data.get('base_unit') %}
+                                            {{ form_data.get('base_unit') }}
+                                        {% elif material and material.base_unit %}
+                                            {{ material.base_unit }}
+                                        {% else %}
+                                            Units
+                                        {% endif %}
+                                    </span>
+                                </span>
+                                {% if errors and errors.get('weight') %}
+                                <div class="invalid-feedback">
+                                    {{ errors.get('weight') }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="form-text">Leave blank if not applicable.</div>
+                        </div>
+                        
+                        <!-- Volume field -->
+                        <div class="mb-3">
+                            <label for="volume" class="form-label">Volume</label>
+                            <div class="input-group">
+                                <input type="number" step="0.01" min="0" 
+                                       class="form-control {% if errors and errors.get('volume') %}is-invalid{% endif %}" 
+                                       id="volume" name="volume" 
+                                       value="{{ form_data.get('volume') or (material.volume if material else '') }}" 
+                                       aria-describedby="volume-unit">
+                                <span class="input-group-text" id="volume-unit">
+                                    <span id="volume-unit-text">
+                                        {% if form_data.get('base_unit') %}
+                                            Cubic {{ form_data.get('base_unit') }}
+                                        {% elif material and material.base_unit %}
+                                            Cubic {{ material.base_unit }}
+                                        {% else %}
+                                            Cubic Units
+                                        {% endif %}
+                                    </span>
+                                </span>
+                                {% if errors and errors.get('volume') %}
+                                <div class="invalid-feedback">
+                                    {{ errors.get('volume') }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="form-text">Leave blank if not applicable.</div>
+                        </div>
+                        
+                        <!-- Status field (only for editing) -->
+                        {% if material %}
+                        <div class="mb-3">
+                            <label for="status" class="form-label">Status <span class="text-danger">*</span></label>
+                            <select class="form-select {% if errors and errors.get('status') %}is-invalid{% endif %}" 
+                                    id="status" name="status" required
+                                    {% if material and material.status == 'DEPRECATED' %}disabled{% endif %}>
+                                {% for status in options.statuses %}
+                                <option value="{{ status }}" 
+                                        {% if form_data.get('status') == status or (material and material.status == status) %}selected{% endif %}
+                                        {% if status == 'DEPRECATED' %}disabled{% endif %}>
+                                    {{ status }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if errors and errors.get('status') %}
+                            <div class="invalid-feedback">
+                                {{ errors.get('status') }}
+                            </div>
+                            {% endif %}
+                            {% if material and material.status == 'DEPRECATED' %}
+                            <div class="form-text text-danger">
+                                Deprecated materials cannot be edited.
+                            </div>
+                            {% else %}
+                            <div class="form-text">
+                                Use "DEPRECATED" action on the detail page to deprecate materials.
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="form-actions mt-4 text-end">
+                    <a href="{{ url_for('material_list') }}" class="btn btn-secondary me-2">Cancel</a>
+                    <button type="submit" class="btn btn-primary" 
+                            {% if material and material.status == 'DEPRECATED' %}disabled{% endif %}>
+                        {% if material %}Update Material{% else %}Create Material{% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Update unit display based on selected base unit
+    document.addEventListener('DOMContentLoaded', function() {
+        const baseUnitSelect = document.getElementById('base_unit');
+        const weightUnitText = document.getElementById('weight-unit-text');
+        const volumeUnitText = document.getElementById('volume-unit-text');
+        
+        function updateUnits() {
+            const selectedUnit = baseUnitSelect.value;
+            weightUnitText.textContent = selectedUnit || 'Units';
+            volumeUnitText.textContent = 'Cubic ' + (selectedUnit || 'Units');
+        }
+        
+        baseUnitSelect.addEventListener('change', updateUnits);
+        
+        // Initial update
+        updateUnits();
+    });
+    
+    // Form validation
+    document.getElementById('material-form').addEventListener('submit', function(event) {
+        const form = event.target;
+        
+        if (!form.checkValidity()) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        
+        form.classList.add('was-validated');
+    });
+</script>
+
+<style>
+    .form-actions {
+        border-top: 1px solid #dee2e6;
+        padding-top: 1rem;
+    }
+</style>
+{% endblock %}

@@ -12,10 +12,20 @@ from models.material import MaterialStatus
 from services.state_manager import state_manager
 from services.material_service import material_service
 from services.p2p_service_helpers import (
-    validate_requisition_status_transition, validate_order_status_transition,
-    validate_material_active, validate_requisition_items, validate_order_items,
-    validate_vendor, prepare_received_items, determine_order_status_from_items,
-    append_note
+    validate_material_active, prepare_received_items, 
+    determine_order_status_from_items, append_note
+)
+from services.p2p_service_order import (
+    validate_order_for_submission, validate_order_for_approval,
+    validate_order_for_receipt, validate_order_for_completion,
+    validate_order_for_cancellation, validate_order_for_deletion,
+    prepare_order_update_with_received_items, filter_orders
+)
+from services.p2p_service_requisition import (
+    validate_requisition_for_submission, validate_requisition_for_approval,
+    validate_requisition_for_rejection, validate_requisition_for_deletion,
+    validate_requisition_for_update, validate_requisition_for_order_creation,
+    prepare_rejection_update, filter_requisitions
 )
 from utils.error_utils import NotFoundError, ValidationError, ConflictError, BadRequestError
 
@@ -38,7 +48,7 @@ class P2PService:
         self.material_service = material_service_instance or material_service
         self.data_layer = P2PDataLayer(self.state_manager)
     
-    # ===== Requisition Methods =====
+    # ===== Requisition Core Methods (CRUD) =====
     
     def get_requisition(self, document_number: str) -> Requisition:
         """
@@ -55,7 +65,13 @@ class P2PService:
         """
         requisition = self.data_layer.get_requisition(document_number)
         if not requisition:
-            raise NotFoundError(f"Requisition {document_number} not found")
+            raise NotFoundError(
+                message=f"Requisition {document_number} not found",
+                details={
+                    "document_number": document_number,
+                    "entity_type": "Requisition"
+                }
+            )
         return requisition
     
     def list_requisitions(self, 
@@ -79,44 +95,17 @@ class P2PService:
         Returns:
             List of requisitions matching the criteria
         """
-        # Get all requisitions first
+        # Get all requisitions and use the filter helper
         all_requisitions = self.data_layer.list_requisitions()
-        
-        # Filter by status if provided
-        if status:
-            if isinstance(status, list):
-                all_requisitions = [r for r in all_requisitions if r.status in status]
-            else:
-                all_requisitions = [r for r in all_requisitions if r.status == status]
-        
-        # Filter by requester if provided
-        if requester:
-            all_requisitions = [r for r in all_requisitions if r.requester == requester]
-        
-        # Filter by department if provided
-        if department:
-            all_requisitions = [r for r in all_requisitions if r.department == department]
-        
-        # Filter by search term if provided
-        if search_term:
-            search_term = search_term.lower()
-            filtered_requisitions = []
-            for req in all_requisitions:
-                if (
-                    search_term in req.description.lower() or
-                    search_term in req.document_number.lower() or
-                    any(search_term in item.description.lower() for item in req.items)
-                ):
-                    filtered_requisitions.append(req)
-            all_requisitions = filtered_requisitions
-        
-        # Filter by date range if provided
-        if date_from:
-            all_requisitions = [r for r in all_requisitions if r.created_at >= date_from]
-        if date_to:
-            all_requisitions = [r for r in all_requisitions if r.created_at <= date_to]
-        
-        return all_requisitions
+        return filter_requisitions(
+            all_requisitions,
+            status=status,
+            requester=requester,
+            department=department,
+            search_term=search_term,
+            date_from=date_from,
+            date_to=date_to
+        )
     
     def create_requisition(self, requisition_data: RequisitionCreate) -> Requisition:
         """
@@ -135,10 +124,32 @@ class P2PService:
         # Validate material references in items if provided
         for item in requisition_data.items:
             if item.material_number:
-                validate_material_active(self.material_service, item.material_number)
+                try:
+                    validate_material_active(self.material_service, item.material_number)
+                except ValidationError as e:
+                    # Enhance error with item context
+                    raise ValidationError(
+                        message=f"Invalid material in item {item.item_number}: {e.message}",
+                        details={
+                            "item_number": item.item_number,
+                            "material_number": item.material_number,
+                            "original_error": e.details if hasattr(e, 'details') else {}
+                        }
+                    )
         
         # Create the requisition
-        return self.data_layer.create_requisition(requisition_data)
+        try:
+            return self.data_layer.create_requisition(requisition_data)
+        except ConflictError as e:
+            # Enhance conflict error with more context
+            raise ConflictError(
+                message=e.message,
+                details={
+                    "document_number": requisition_data.document_number,
+                    "entity_type": "Requisition",
+                    "conflict_reason": "document_number_exists" 
+                }
+            )
     
     def update_requisition(self, document_number: str, update_data: RequisitionUpdate) -> Requisition:
         """
@@ -158,30 +169,71 @@ class P2PService:
         # Check if requisition exists
         requisition = self.get_requisition(document_number)
         
-        # Add business validations here
-        # For example, don't allow updating items after requisition is submitted
-        if (requisition.status != DocumentStatus.DRAFT and 
-            update_data.items is not None and 
-            update_data.status is None):  # Allow status updates
-            raise ValidationError("Cannot update items after requisition is submitted")
-        
-        # If status changes, validate the transition
-        if update_data.status is not None and update_data.status != requisition.status:
-            if not validate_requisition_status_transition(requisition.status, update_data.status):
-                raise ValidationError(
-                    f"Invalid status transition from {requisition.status} to {update_data.status}"
-                )
-            
-            # If changing to SUBMITTED, validate items
-            if update_data.status == DocumentStatus.SUBMITTED:
-                validate_requisition_items(requisition.items)
+        # Validate the update
+        try:
+            validate_requisition_for_update(requisition, update_data)
+        except ValidationError as e:
+            # Re-raise the validation error
+            raise ValidationError(
+                message=f"Cannot update requisition {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
+            )
         
         # Update the requisition
         updated_requisition = self.data_layer.update_requisition(document_number, update_data)
         if not updated_requisition:
-            raise NotFoundError(f"Requisition {document_number} not found")
+            raise NotFoundError(
+                message=f"Requisition {document_number} not found",
+                details={
+                    "document_number": document_number,
+                    "entity_type": "Requisition",
+                    "operation": "update"
+                }
+            )
         
         return updated_requisition
+    
+    def delete_requisition(self, document_number: str) -> bool:
+        """
+        Delete a requisition with business logic validations.
+        
+        Args:
+            document_number: The requisition document number
+            
+        Returns:
+            True if the requisition was deleted, False otherwise
+            
+        Raises:
+            NotFoundError: If the requisition is not found
+            ValidationError: If the requisition cannot be deleted
+        """
+        # Check if requisition exists
+        requisition = self.get_requisition(document_number)
+        
+        # Validate the requisition can be deleted
+        try:
+            validate_requisition_for_deletion(requisition)
+        except ValidationError as e:
+            raise ValidationError(
+                message=f"Cannot delete requisition {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
+            )
+        
+        # Delete the requisition
+        result = self.data_layer.delete_requisition(document_number)
+        if not result:
+            raise NotFoundError(
+                message=f"Requisition {document_number} not found",
+                details={
+                    "document_number": document_number,
+                    "entity_type": "Requisition",
+                    "operation": "delete"
+                }
+            )
+        
+        return result
+    
+    # ===== Requisition Workflow Operations =====
     
     def submit_requisition(self, document_number: str) -> Requisition:
         """
@@ -200,14 +252,14 @@ class P2PService:
         # Check if requisition exists
         requisition = self.get_requisition(document_number)
         
-        # Check if requisition can be submitted
-        if requisition.status != DocumentStatus.DRAFT:
+        # Validate the requisition can be submitted
+        try:
+            validate_requisition_for_submission(requisition)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot submit requisition with status {requisition.status}. Must be DRAFT."
+                message=f"Cannot submit requisition {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
-        
-        # Validate requisition items
-        validate_requisition_items(requisition.items)
         
         # Update status to SUBMITTED
         update_data = RequisitionUpdate(status=DocumentStatus.SUBMITTED)
@@ -230,10 +282,13 @@ class P2PService:
         # Check if requisition exists
         requisition = self.get_requisition(document_number)
         
-        # Check if requisition can be approved
-        if requisition.status != DocumentStatus.SUBMITTED:
+        # Validate the requisition can be approved
+        try:
+            validate_requisition_for_approval(requisition)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot approve requisition with status {requisition.status}. Must be SUBMITTED."
+                message=f"Cannot approve requisition {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
         
         # Update status to APPROVED
@@ -258,53 +313,20 @@ class P2PService:
         # Check if requisition exists
         requisition = self.get_requisition(document_number)
         
-        # Check if requisition can be rejected
-        if requisition.status != DocumentStatus.SUBMITTED:
+        # Validate the requisition can be rejected
+        try:
+            validate_requisition_for_rejection(requisition, reason)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot reject requisition with status {requisition.status}. Must be SUBMITTED."
+                message=f"Cannot reject requisition {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
         
-        # Update status to REJECTED and add rejection reason to notes
-        new_notes = append_note(requisition.notes, f"REJECTED: {reason}")
-        
-        update_data = RequisitionUpdate(
-            status=DocumentStatus.REJECTED,
-            notes=new_notes
-        )
+        # Prepare and apply the update
+        update_data = prepare_rejection_update(requisition, reason)
         return self.update_requisition(document_number, update_data)
     
-    def delete_requisition(self, document_number: str) -> bool:
-        """
-        Delete a requisition with business logic validations.
-        
-        Args:
-            document_number: The requisition document number
-            
-        Returns:
-            True if the requisition was deleted, False otherwise
-            
-        Raises:
-            NotFoundError: If the requisition is not found
-            ValidationError: If the requisition cannot be deleted
-        """
-        # Check if requisition exists
-        requisition = self.get_requisition(document_number)
-        
-        # Check if requisition can be deleted (only allow deleting DRAFT or REJECTED)
-        if requisition.status not in [DocumentStatus.DRAFT, DocumentStatus.REJECTED]:
-            raise ValidationError(
-                f"Cannot delete requisition with status {requisition.status}. " 
-                f"Only DRAFT or REJECTED requisitions can be deleted."
-            )
-        
-        # Delete the requisition
-        result = self.data_layer.delete_requisition(document_number)
-        if not result:
-            raise NotFoundError(f"Requisition {document_number} not found")
-        
-        return result
-    
-    # ===== Order Methods =====
+    # ===== Order Core Methods (CRUD) =====
     
     def get_order(self, document_number: str) -> Order:
         """
@@ -321,7 +343,13 @@ class P2PService:
         """
         order = self.data_layer.get_order(document_number)
         if not order:
-            raise NotFoundError(f"Order {document_number} not found")
+            raise NotFoundError(
+                message=f"Order {document_number} not found",
+                details={
+                    "document_number": document_number,
+                    "entity_type": "Order"
+                }
+            )
         return order
     
     def list_orders(self, 
@@ -345,45 +373,17 @@ class P2PService:
         Returns:
             List of orders matching the criteria
         """
-        # Get all orders first
+        # Get all orders and use the filter helper
         all_orders = self.data_layer.list_orders()
-        
-        # Filter by status if provided
-        if status:
-            if isinstance(status, list):
-                all_orders = [o for o in all_orders if o.status in status]
-            else:
-                all_orders = [o for o in all_orders if o.status == status]
-        
-        # Filter by vendor if provided
-        if vendor:
-            all_orders = [o for o in all_orders if o.vendor == vendor]
-        
-        # Filter by requisition reference if provided
-        if requisition_reference:
-            all_orders = [o for o in all_orders if o.requisition_reference == requisition_reference]
-        
-        # Filter by search term if provided
-        if search_term:
-            search_term = search_term.lower()
-            filtered_orders = []
-            for order in all_orders:
-                if (
-                    search_term in order.description.lower() or
-                    search_term in order.document_number.lower() or
-                    (order.vendor and search_term in order.vendor.lower()) or
-                    any(search_term in item.description.lower() for item in order.items)
-                ):
-                    filtered_orders.append(order)
-            all_orders = filtered_orders
-        
-        # Filter by date range if provided
-        if date_from:
-            all_orders = [o for o in all_orders if o.created_at >= date_from]
-        if date_to:
-            all_orders = [o for o in all_orders if o.created_at <= date_to]
-        
-        return all_orders
+        return filter_orders(
+            all_orders,
+            status=status,
+            vendor=vendor,
+            requisition_reference=requisition_reference,
+            search_term=search_term,
+            date_from=date_from,
+            date_to=date_to
+        )
     
     def create_order(self, order_data: OrderCreate) -> Order:
         """
@@ -399,16 +399,130 @@ class P2PService:
             ValidationError: If the order data is invalid
             ConflictError: If an order with the same number already exists
         """
-        # Validate vendor
-        validate_vendor(order_data.vendor)
-        
-        # Validate material references in items if provided
+        # Validate materials in items
         for item in order_data.items:
             if item.material_number:
-                validate_material_active(self.material_service, item.material_number)
+                try:
+                    validate_material_active(self.material_service, item.material_number)
+                except ValidationError as e:
+                    # Enhance error with item context
+                    raise ValidationError(
+                        message=f"Invalid material in item {item.item_number}: {e.message}",
+                        details={
+                            "item_number": item.item_number,
+                            "material_number": item.material_number,
+                            "original_error": e.details if hasattr(e, 'details') else {}
+                        }
+                    )
         
         # Create the order
-        return self.data_layer.create_order(order_data)
+        try:
+            return self.data_layer.create_order(order_data)
+        except ConflictError as e:
+            # Enhance conflict error with more context
+            raise ConflictError(
+                message=e.message,
+                details={
+                    "document_number": order_data.document_number,
+                    "entity_type": "Order",
+                    "conflict_reason": "document_number_exists" 
+                }
+            )
+    
+    def update_order(self, document_number: str, update_data: OrderUpdate) -> Order:
+        """
+        Update an order with business logic validations.
+        
+        Args:
+            document_number: The order document number
+            update_data: The order update data
+            
+        Returns:
+            The updated order
+            
+        Raises:
+            NotFoundError: If the order is not found
+            ValidationError: If the update data is invalid
+        """
+        # Get the order
+        order = self.get_order(document_number)
+        
+        # Check if we're updating items after submission
+        if (order.status != DocumentStatus.DRAFT and 
+            update_data.items is not None and 
+            update_data.status is None):  # Allow status updates
+            raise ValidationError(
+                message="Cannot update items after order is submitted",
+                details={
+                    "document_number": document_number,
+                    "current_status": order.status.value,
+                    "attempted_update": "items",
+                    "reason": "items_locked_after_submission"
+                }
+            )
+        
+        # Update the order
+        updated_order = self.data_layer.update_order(document_number, update_data)
+        if not updated_order:
+            raise NotFoundError(
+                message=f"Order {document_number} not found",
+                details={
+                    "document_number": document_number,
+                    "entity_type": "Order",
+                    "operation": "update"
+                }
+            )
+        
+        return updated_order
+    
+    def delete_order(self, document_number: str) -> bool:
+        """
+        Delete an order with business logic validations.
+        
+        Args:
+            document_number: The order document number
+            
+        Returns:
+            True if the order was deleted, False otherwise
+            
+        Raises:
+            NotFoundError: If the order is not found
+            ValidationError: If the order cannot be deleted
+        """
+        # Check if order exists
+        order = self.get_order(document_number)
+        
+        # Validate the order can be deleted
+        try:
+            validate_order_for_deletion(order)
+        except ValidationError as e:
+            raise ValidationError(
+                message=f"Cannot delete order {document_number}: {e.message}",
+                details={
+                    "document_number": document_number,
+                    "current_status": order.status.value,
+                    "allowed_status": DocumentStatus.DRAFT.value,
+                    "operation": "delete",
+                    "reason": "invalid_status_for_deletion",
+                    "validation_errors": e.details if hasattr(e, 'details') else {}
+                }
+            )
+        
+        # Delete the order
+        result = self.data_layer.delete_order(document_number)
+        if not result:
+            raise NotFoundError(
+                message=f"Order {document_number} not found",
+                details={
+                    "document_number": document_number,
+                    "entity_type": "Order",
+                    "operation": "delete"
+                }
+            )
+        
+        return result
+    
+    # ===== Order Workflow Operations =====
     
     def create_order_from_requisition(self, requisition_number: str, vendor: str, 
                                       payment_terms: Optional[str] = None) -> Order:
@@ -430,64 +544,30 @@ class P2PService:
         # Check if requisition exists
         requisition = self.get_requisition(requisition_number)
         
-        # Check if requisition is approved
-        if requisition.status != DocumentStatus.APPROVED:
+        # Validate the requisition can be used to create an order
+        try:
+            validate_requisition_for_order_creation(requisition)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot create order from requisition with status {requisition.status}. "
-                f"Must be APPROVED."
+                message=f"Cannot create order from requisition {requisition_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
         
-        # Validate vendor
-        validate_vendor(vendor)
-        
         # Create the order
-        return self.data_layer.create_order_from_requisition(
-            requisition_number, vendor, payment_terms
-        )
-    
-    def update_order(self, document_number: str, update_data: OrderUpdate) -> Order:
-        """
-        Update an order with business logic validations.
-        
-        Args:
-            document_number: The order document number
-            update_data: The order update data
-            
-        Returns:
-            The updated order
-            
-        Raises:
-            NotFoundError: If the order is not found
-            ValidationError: If the update data is invalid
-        """
-        # Check if order exists
-        order = self.get_order(document_number)
-        
-        # Add business validations here
-        # For example, don't allow updating items after order is submitted
-        if (order.status != DocumentStatus.DRAFT and 
-            update_data.items is not None and 
-            update_data.status is None):  # Allow status updates
-            raise ValidationError("Cannot update items after order is submitted")
-        
-        # If status changes, validate the transition
-        if update_data.status is not None and update_data.status != order.status:
-            if not validate_order_status_transition(order.status, update_data.status):
-                raise ValidationError(
-                    f"Invalid status transition from {order.status} to {update_data.status}"
-                )
-            
-            # If changing to SUBMITTED, validate items and vendor
-            if update_data.status == DocumentStatus.SUBMITTED:
-                validate_vendor(order.vendor)
-                validate_order_items(order.items)
-        
-        # Update the order
-        updated_order = self.data_layer.update_order(document_number, update_data)
-        if not updated_order:
-            raise NotFoundError(f"Order {document_number} not found")
-        
-        return updated_order
+        try:
+            return self.data_layer.create_order_from_requisition(
+                requisition_number, vendor, payment_terms
+            )
+        except Exception as e:
+            # Handle any other exceptions
+            raise BadRequestError(
+                message=f"Failed to create order from requisition {requisition_number}: {str(e)}",
+                details={
+                    "requisition_number": requisition_number,
+                    "vendor": vendor,
+                    "error": str(e)
+                }
+            )
     
     def submit_order(self, document_number: str) -> Order:
         """
@@ -506,15 +586,14 @@ class P2PService:
         # Check if order exists
         order = self.get_order(document_number)
         
-        # Check if order can be submitted
-        if order.status != DocumentStatus.DRAFT:
+        # Validate the order for submission
+        try:
+            validate_order_for_submission(order)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot submit order with status {order.status}. Must be DRAFT."
+                message=f"Cannot submit order {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
-        
-        # Validate vendor and items
-        validate_vendor(order.vendor)
-        validate_order_items(order.items)
         
         # Update status to SUBMITTED
         update_data = OrderUpdate(status=DocumentStatus.SUBMITTED)
@@ -537,10 +616,13 @@ class P2PService:
         # Check if order exists
         order = self.get_order(document_number)
         
-        # Check if order can be approved
-        if order.status != DocumentStatus.SUBMITTED:
+        # Validate the order for approval
+        try:
+            validate_order_for_approval(order)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot approve order with status {order.status}. Must be SUBMITTED."
+                message=f"Cannot approve order {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
         
         # Update status to APPROVED
@@ -567,24 +649,63 @@ class P2PService:
         # Check if order exists
         order = self.get_order(document_number)
         
-        # Check if order can be received
-        if order.status != DocumentStatus.APPROVED:
+        # Validate the order for receipt
+        try:
+            validate_order_for_receipt(order)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot receive order with status {order.status}. Must be APPROVED."
+                message=f"Cannot receive order {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
         
-        # Prepare updated items with received quantities
-        updated_items = prepare_received_items(order, received_items)
+        # Validate received quantities if provided
+        if received_items:
+            # Verify all items exist in the order
+            order_item_numbers = [item.item_number for item in order.items]
+            unknown_items = [item_num for item_num in received_items.keys() if item_num not in order_item_numbers]
+            
+            if unknown_items:
+                raise ValidationError(
+                    message=f"Order {document_number} contains unknown item numbers",
+                    details={
+                        "document_number": document_number,
+                        "unknown_items": unknown_items,
+                        "valid_items": order_item_numbers,
+                        "reason": "unknown_item_numbers"
+                    }
+                )
+            
+            # Verify received quantities are not negative
+            negative_quantities = {item_num: qty for item_num, qty in received_items.items() if qty < 0}
+            if negative_quantities:
+                raise ValidationError(
+                    message="Received quantities cannot be negative",
+                    details={
+                        "document_number": document_number,
+                        "negative_quantities": negative_quantities,
+                        "reason": "negative_quantities"
+                    }
+                )
+            
+            # Verify received quantities do not exceed ordered quantities
+            for item in order.items:
+                if item.item_number in received_items:
+                    if received_items[item.item_number] > item.quantity - item.received_quantity:
+                        raise ValidationError(
+                            message=f"Received quantity exceeds remaining quantity for item {item.item_number}",
+                            details={
+                                "document_number": document_number,
+                                "item_number": item.item_number,
+                                "ordered_quantity": item.quantity,
+                                "already_received": item.received_quantity,
+                                "attempted_receive": received_items[item.item_number],
+                                "max_allowed": item.quantity - item.received_quantity,
+                                "reason": "quantity_exceeds_remaining"
+                            }
+                        )
         
-        # Determine new order status based on items
-        new_status = determine_order_status_from_items(updated_items)
-        
-        # Update order with new items and status
-        update_data = OrderUpdate(
-            items=updated_items,
-            status=new_status
-        )
-        
+        # Prepare and apply the update
+        update_data = prepare_order_update_with_received_items(order, received_items)
         return self.update_order(document_number, update_data)
     
     def complete_order(self, document_number: str) -> Order:
@@ -604,11 +725,13 @@ class P2PService:
         # Check if order exists
         order = self.get_order(document_number)
         
-        # Check if order can be completed
-        if order.status not in [DocumentStatus.RECEIVED, DocumentStatus.PARTIALLY_RECEIVED]:
+        # Validate the order for completion
+        try:
+            validate_order_for_completion(order)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot complete order with status {order.status}. "
-                f"Must be RECEIVED or PARTIALLY_RECEIVED."
+                message=f"Cannot complete order {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
             )
         
         # Update status to COMPLETED
@@ -633,10 +756,24 @@ class P2PService:
         # Check if order exists
         order = self.get_order(document_number)
         
-        # Check if order can be canceled (not completed or already canceled)
-        if order.status in [DocumentStatus.COMPLETED, DocumentStatus.CANCELED]:
+        # Validate the order for cancellation
+        try:
+            validate_order_for_cancellation(order)
+        except ValidationError as e:
             raise ValidationError(
-                f"Cannot cancel order with status {order.status}."
+                message=f"Cannot cancel order {document_number}: {e.message}",
+                details=e.details if hasattr(e, 'details') else {}
+            )
+        
+        # Validate reason is provided
+        if not reason or not reason.strip():
+            raise ValidationError(
+                message="Cancellation reason must be provided",
+                details={
+                    "document_number": document_number,
+                    "error": "missing_cancellation_reason",
+                    "operation": "cancel"
+                }
             )
         
         # Update status to CANCELED and add cancellation reason to notes
@@ -647,38 +784,6 @@ class P2PService:
             notes=new_notes
         )
         return self.update_order(document_number, update_data)
-    
-    def delete_order(self, document_number: str) -> bool:
-        """
-        Delete an order with business logic validations.
-        
-        Args:
-            document_number: The order document number
-            
-        Returns:
-            True if the order was deleted, False otherwise
-            
-        Raises:
-            NotFoundError: If the order is not found
-            ValidationError: If the order cannot be deleted
-        """
-        # Check if order exists
-        order = self.get_order(document_number)
-        
-        # Check if order can be deleted (only allow deleting DRAFT)
-        if order.status != DocumentStatus.DRAFT:
-            raise ValidationError(
-                f"Cannot delete order with status {order.status}. "
-                f"Only DRAFT orders can be deleted."
-            )
-        
-        # Delete the order
-        result = self.data_layer.delete_order(document_number)
-        if not result:
-            raise NotFoundError(f"Order {document_number} not found")
-        
-        return result
-
 
 # Create a singleton instance
 p2p_service = P2PService()

@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>Materials</h1>
+    
+    <!-- Status messages -->
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger">
+        {{ request.query_params.get('error') }}
+    </div>
+    {% endif %}
+    
+    {% if request.query_params.get('message') %}
+    <div class="alert alert-success">
+        {{ request.query_params.get('message') }}
+    </div>
+    {% endif %}
+    
+    <!-- Search and filter controls -->
+    <div class="search-filter-container">
+        <form method="GET" action="{{ url_for('material_list') }}" class="filter-form">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="form-group">
+                        <label for="search">Search:</label>
+                        <input type="text" id="search" name="search" class="form-control" 
+                               value="{{ filters.search or '' }}" placeholder="Search by name, number, or description">
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label for="type">Material Type:</label>
+                        <select id="type" name="type" class="form-control">
+                            <option value="">All Types</option>
+                            {% for type in filter_options.types %}
+                            <option value="{{ type }}" {% if filters.type == type %}selected{% endif %}>
+                                {{ type }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label for="status">Status:</label>
+                        <select id="status" name="status" class="form-control">
+                            <option value="">All Statuses</option>
+                            {% for status in filter_options.statuses %}
+                            <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>
+                                {{ status }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="col-md-2">
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <div>
+                            <button type="submit" class="btn btn-primary">Filter</button>
+                            <a href="{{ url_for('material_list') }}" class="btn btn-secondary">Reset</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Action buttons -->
+    <div class="action-buttons mb-3">
+        <a href="{{ url_for('material_create_form') }}" class="btn btn-success">
+            Create New Material
+        </a>
+    </div>
+    
+    <!-- Materials table -->
+    <div class="table-responsive">
+        {% if materials %}
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>Material Number</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Base Unit</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for material in materials %}
+                <tr {% if material.status == 'DEPRECATED' %}class="text-muted"{% endif %}>
+                    <td>{{ material.material_number }}</td>
+                    <td>{{ material.name }}</td>
+                    <td>{{ material.type }}</td>
+                    <td>
+                        {% if material.status == 'ACTIVE' %}
+                        <span class="badge bg-success">{{ material.status }}</span>
+                        {% elif material.status == 'INACTIVE' %}
+                        <span class="badge bg-warning">{{ material.status }}</span>
+                        {% elif material.status == 'DEPRECATED' %}
+                        <span class="badge bg-secondary">{{ material.status }}</span>
+                        {% else %}
+                        <span class="badge bg-info">{{ material.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ material.base_unit }}</td>
+                    <td>{{ material.updated_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <a href="{{ url_for('material_detail', {'material_id': material.material_number}) }}" 
+                           class="btn btn-sm btn-info">View</a>
+                        
+                        {% if material.status != 'DEPRECATED' %}
+                        <a href="{{ url_for('material_update_form', {'material_id': material.material_number}) }}" 
+                           class="btn btn-sm btn-primary">Edit</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <!-- Pagination placeholder -->
+        <!-- This will be expanded in future versions when pagination is implemented -->
+        <nav aria-label="Materials pagination">
+            <ul class="pagination justify-content-center">
+                <li class="page-item disabled">
+                    <a class="page-link" href="#" tabindex="-1" aria-disabled="true">Previous</a>
+                </li>
+                <li class="page-item active"><a class="page-link" href="#">1</a></li>
+                <li class="page-item"><a class="page-link" href="#">2</a></li>
+                <li class="page-item"><a class="page-link" href="#">3</a></li>
+                <li class="page-item">
+                    <a class="page-link" href="#">Next</a>
+                </li>
+            </ul>
+        </nav>
+        
+        {% else %}
+        <div class="alert alert-info">
+            No materials found. Please adjust your search criteria or 
+            <a href="{{ url_for('material_create_form') }}">create a new material</a>.
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Results summary -->
+    {% if materials %}
+    <div class="results-summary">
+        Showing {{ materials|length }} materials
+        {% if filters.search or filters.type or filters.status %}
+        with filters:
+        {% if filters.search %}Search: "{{ filters.search }}"{% endif %}
+        {% if filters.type %}Type: {{ filters.type }}{% endif %}
+        {% if filters.status %}Status: {{ filters.status }}{% endif %}
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .filter-form {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    
+    .action-buttons {
+        margin: 15px 0;
+    }
+    
+    .results-summary {
+        margin-top: 15px;
+        font-style: italic;
+        color: #6c757d;
+    }
+    
+    .table th {
+        background-color: #f8f9fa;
+    }
+</style>
+{% endblock %}
